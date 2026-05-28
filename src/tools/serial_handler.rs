@@ -3,7 +3,6 @@
 //! This implementation follows the official rust-sdk patterns for proper tool registration
 
 use std::sync::Arc;
-use std::future::Future;
 use rmcp::{
     tool, tool_handler, tool_router, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
@@ -14,7 +13,7 @@ use rmcp::{
 };
 use tracing::{debug, error, info};
 
-use crate::serial::{PortInfo, ConnectionManager};
+use crate::serial::{PortInfo, ConnectionManager, LocalSerialError};
 use crate::config::Config;
 use super::types::*;
 
@@ -22,17 +21,14 @@ use super::types::*;
 #[derive(Clone)]
 pub struct SerialHandler {
     connection_manager: Arc<ConnectionManager>,
-    #[allow(dead_code)]
-    config: Config,
     tool_router: ToolRouter<SerialHandler>,
 }
 
 #[tool_router]
 impl SerialHandler {
-    pub fn new(config: Config) -> Self {
+    pub fn new(_config: Config) -> Self {
         Self {
             connection_manager: Arc::new(ConnectionManager::new()),
-            config,
             tool_router: Self::tool_router(),
         }
     }
@@ -92,7 +88,11 @@ impl SerialHandler {
             Err(e) => {
                 error!("Failed to open serial connection to {}: {}", config.port, e);
                 let error_msg = format!("Error: Failed to open port {} - {}", config.port, e);
-                Err(McpError::internal_error(error_msg, None))
+                if matches!(e, LocalSerialError::ConnectionExists(_)) {
+                    Err(McpError::invalid_request(error_msg, None))
+                } else {
+                    Err(McpError::internal_error(error_msg, None))
+                }
             }
         }
     }
@@ -110,7 +110,11 @@ impl SerialHandler {
             Err(e) => {
                 error!("Failed to close connection {}: {}", args.connection_id, e);
                 let error_msg = format!("Error: Failed to close connection {} - {}", args.connection_id, e);
-                Err(McpError::internal_error(error_msg, None))
+                if matches!(e, LocalSerialError::InvalidConnection(_)) {
+                    Err(McpError::invalid_request(error_msg, None))
+                } else {
+                    Err(McpError::internal_error(error_msg, None))
+                }
             }
         }
     }
@@ -125,17 +129,17 @@ impl SerialHandler {
             Err(e) => {
                 error!("Invalid connection ID {}: {}", args.connection_id, e);
                 let error_msg = format!("Error: Connection ID {} not found", args.connection_id);
-                return Err(McpError::internal_error(error_msg, None));
+                return Err(McpError::invalid_request(error_msg, None));
             }
         };
-        
+
         // Decode data
         let data = match decode_data(&args.data, &args.encoding) {
             Ok(data) => data,
-            Err(e) => {  
+            Err(e) => {
                 error!("Failed to decode data with encoding {}: {}", args.encoding, e);
                 let error_msg = format!("Error: Data decoding failed - {}", e);
-                return Err(McpError::internal_error(error_msg, None));
+                return Err(McpError::invalid_request(error_msg, None));
             }
         };
         
@@ -167,7 +171,7 @@ impl SerialHandler {
             Err(e) => {
                 error!("Invalid connection ID {}: {}", args.connection_id, e);
                 let error_msg = format!("Error: Connection ID {} not found", args.connection_id);
-                return Err(McpError::internal_error(error_msg, None));
+                return Err(McpError::invalid_request(error_msg, None));
             }
         };
         
@@ -201,7 +205,7 @@ impl SerialHandler {
                     Err(e) => {
                         error!("Failed to encode read data: {}", e);
                         let error_msg = format!("Error: Data encoding failed - {}", e);
-                        Err(McpError::internal_error(error_msg, None))
+                        Err(McpError::invalid_request(error_msg, None))
                     }
                 }
             }
@@ -244,54 +248,5 @@ impl ServerHandler for SerialHandler {
     ) -> Result<InitializeResult, McpError> {
         info!("Serial MCP server initialized");
         Ok(self.get_info())
-    }
-}
-
-/// Decode data to bytes array
-fn decode_data(data: &str, encoding: &str) -> Result<Vec<u8>, String> {
-    match encoding {
-        "utf8" | "utf-8" => Ok(data.as_bytes().to_vec()),
-        "hex" => {
-            let data = data.trim().replace(' ', "");
-            if data.len() % 2 != 0 {
-                return Err("Hex string must have even length".to_string());
-            }
-            
-            (0..data.len())
-                .step_by(2)
-                .map(|i| {
-                    u8::from_str_radix(&data[i..i+2], 16)
-                        .map_err(|_| format!("Invalid hex character at position {}", i))
-                })
-                .collect()
-        }
-        "base64" => {
-            use base64::{Engine as _, engine::general_purpose};
-            general_purpose::STANDARD
-                .decode(data.trim())
-                .map_err(|e| format!("Invalid base64: {}", e))
-        }
-        _ => Err(format!("Unsupported encoding: {}", encoding)),
-    }
-}
-
-/// Encode bytes array to string
-fn encode_data(data: &[u8], encoding: &str) -> Result<String, String> {
-    match encoding {
-        "utf8" | "utf-8" => {
-            String::from_utf8(data.to_vec())
-                .map_err(|e| format!("Invalid UTF-8: {}", e))
-        }
-        "hex" => {
-            Ok(data.iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<_>>()
-                .join(" "))
-        }
-        "base64" => {
-            use base64::{Engine as _, engine::general_purpose};
-            Ok(general_purpose::STANDARD.encode(data))
-        }
-        _ => Err(format!("Unsupported encoding: {}", encoding)),
     }
 }

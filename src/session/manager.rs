@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::Interval;
 use tracing::{debug, info, warn, error};
 
 use crate::error::{SerialError, SessionError, Result};
@@ -19,15 +18,12 @@ use super::session::{SerialSession, SessionState, SessionConfig, SessionInfo};
 pub struct SessionManager {
     /// Active sessions indexed by session ID
     sessions: Arc<RwLock<HashMap<String, SerialSession>>>,
-    
+
     /// Connection manager for creating new connections
     connection_manager: Arc<ConnectionManager>,
-    
+
     /// Configuration
     config: Config,
-    
-    /// Cleanup interval timer
-    cleanup_interval: Option<Interval>,
 }
 
 impl SessionManager {
@@ -37,7 +33,6 @@ impl SessionManager {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             connection_manager: Arc::new(ConnectionManager::new()),
             config,
-            cleanup_interval: None,
         }
     }
 
@@ -59,8 +54,6 @@ impl SessionManager {
             }
         });
         
-        // Store a new interval for potential cleanup later (though not actually used)
-        self.cleanup_interval = Some(tokio::time::interval(Duration::from_secs(cleanup_interval_secs)));
         Ok(())
     }
 

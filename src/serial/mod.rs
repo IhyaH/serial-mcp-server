@@ -88,8 +88,9 @@ impl ConnectionManager {
         let mut connections = self.connections.write().await;
         
         // Check if port is already in use
+        let port_lower = config.port.to_lowercase();
         for (_, conn) in connections.iter() {
-            if conn.status().await.port == config.port {
+            if conn.status().await.port.to_lowercase() == port_lower {
                 return Err(LocalSerialError::ConnectionExists(config.port));
             }
         }
