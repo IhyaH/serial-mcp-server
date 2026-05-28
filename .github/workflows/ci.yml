@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - run: cargo test --lib --no-fail-fast
 
   lint:
@@ -29,5 +31,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
