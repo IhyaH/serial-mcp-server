@@ -2,7 +2,7 @@
 //! 
 //! This implementation follows the official rust-sdk patterns for proper tool registration
 
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 use rmcp::{
     tool, tool_handler, tool_router, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},

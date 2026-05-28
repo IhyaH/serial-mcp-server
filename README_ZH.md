@@ -1,75 +1,145 @@
-# 串口 MCP 服务器
+# Serial MCP Server
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://rust-lang.org)
-[![RMCP](https://img.shields.io/badge/RMCP-0.3.2-blue.svg)](https://github.com/modelcontextprotocol/rust-sdk)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+基于 [Model Context Protocol](https://modelcontextprotocol.io) 的串口通信服务器。将串口操作暴露为 MCP 工具，使 AI 助手能够发现、连接串口设备并与之通信——包括微控制器、嵌入式系统、传感器和工业设备。
 
-专业的模型上下文协议 (MCP) 串口通信服务器。为 AI 助手提供包括嵌入式系统、IoT 设备和硬件调试在内的全面串口通信功能，支持真实硬件集成。
+## 工具
 
-> 📖 **语言版本**: [English](README.md) | [中文](README_ZH.md)
+服务器注册五个 MCP 工具：
 
-## ✨ 功能特性
+### `list_ports`
 
-- 🚀 **生产就绪**: 真实硬件集成，提供5个综合串口通信工具
-- 🔌 **跨平台支持**: Windows、Linux、macOS，自动端口检测
-- 📡 **完整串口控制**: 列出端口、连接、发送/接收数据，完整配置
-- 📝 **多种数据格式**: UTF-8、Hex、二进制编码支持，带超时处理
-- 🛠️ **硬件集成**: 经过STM32、Arduino、ESP32等嵌入式系统测试
-- 🤖 **AI集成**: 与Claude和其他AI助手完美兼容
-- 🧪 **全面测试**: 所有5个工具在真实硬件上验证通过
-- ⚡ **高性能**: 基于Tokio异步运行时，支持并发连接
+列出系统可用串口。返回端口名、描述和硬件 ID（USB 转串口适配器会显示 USB VID/PID）。
 
-## 🏗️ 架构
+无参数。
+
+### `open`
+
+打开串口连接。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----------|------|---------|-------------|
+| `port` | string | — | 端口名（如 `COM13`、`/dev/ttyUSB0`） |
+| `baud_rate` | u32 | — | 波特率 |
+| `data_bits` | string | `"8"` | 数据位：`"5"`, `"6"`, `"7"`, `"8"` |
+| `stop_bits` | string | `"1"` | 停止位：`"1"`, `"2"` |
+| `parity` | string | `"none"` | 校验位：`"none"`, `"odd"`, `"even"` |
+| `flow_control` | string | `"none"` | 流控：`"none"`, `"software"`, `"hardware"` |
+
+返回 `connection_id`（UUID），用于后续操作。
+
+支持的波特率：300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200, 230400, 460800, 921600。
+
+### `close`
+
+关闭串口连接。
+
+| 参数 | 类型 | 说明 |
+|-----------|------|-------------|
+| `connection_id` | string | `open` 返回的连接 ID |
+
+### `write`
+
+发送数据到串口设备。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----------|------|---------|-------------|
+| `connection_id` | string | — | 连接 ID |
+| `data` | string | — | 待发送数据 |
+| `encoding` | string | `"utf8"` | 编码：`"utf8"`, `"hex"`, `"base64"` |
+
+数据先按指定编码解码后再发送。Hex 编码支持空格分隔的字节（如 `"0D 0A"`）。
+
+### `read`
+
+从串口设备读取数据。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----------|------|---------|-------------|
+| `connection_id` | string | — | 连接 ID |
+| `timeout_ms` | u64 | — | 读取超时毫秒数（可选） |
+| `max_bytes` | usize | 1024 | 最大读取字节数 |
+| `encoding` | string | `"utf8"` | 输出编码：`"utf8"`, `"hex"`, `"base64"` |
+
+读取的数据按指定编码格式化后返回。超时返回成功结果（读取字节数为 0），而非错误。
+
+## 架构
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MCP 客户端    │◄──►│  串口 MCP        │◄──►│  串口设备       │
-│   (Claude/AI)   │    │  服务器          │    │  硬件           │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │  目标设备        │
-                       │  (STM32/Arduino) │
-                       └──────────────────┘
+MCP 客户端 (Claude 等)
+    │  JSON-RPC over stdio
+    ▼
+┌─────────────────────────┐
+│  SerialHandler          │  rmcp 宏: #[tool], #[tool_router]
+│  (tools/serial_handler) │  注册 5 个 MCP 工具
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  ConnectionManager      │  管理并发连接
+│  (serial/mod)           │  基于 Arc<RwLock<HashMap>>
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  SerialConnection       │  异步读写，可配置超时
+│  (serial/connection)    │  封装 tokio-serial SerialStream
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  tokio-serial           │  基于 Tokio 的异步串口 I/O
+│  serialport             │  端口枚举与同步备选
+└─────────────────────────┘
 ```
 
-## 🚀 快速开始
+### 依赖
 
-### 前置要求
+- **rmcp** — MCP 协议实现，提供 `#[tool]` / `#[tool_router]` / `#[tool_handler]` 宏系统
+- **tokio-serial** — 基于 Tokio 的异步串口 I/O
+- **serialport** — 跨平台串口端口枚举
+- **clap** — 命令行参数解析（derive 模式）
 
-**硬件要求:**
-- **串口设备**: STM32, Arduino, ESP32, 或任何UART兼容设备
-- **连接**: USB转串口转换器或内置USB-UART
-- **USB线**: 用于连接设备到PC
+### 模块结构
 
-**软件要求:**
-- Rust 1.70+ 
-- 串口设备驱动程序（大多数系统自动检测）
+| 模块 | 用途 |
+|--------|---------|
+| `tools/serial_handler` | MCP 工具定义和 ServerHandler 实现 |
+| `tools/types` | 请求/响应结构体及编解码辅助函数 |
+| `serial/connection` | `SerialConnection` — 带超时的异步串口 I/O |
+| `serial/port` | `PortInfo` — 系统端口枚举 |
+| `serial/mod` | `ConnectionManager` — 并发连接生命周期管理 |
+| `session` | 会话管理，含空闲清理和统计追踪 |
+| `config` | CLI 参数、TOML 配置、验证与合并 |
+| `error` | 基于 `thiserror` 的统一错误体系 |
+| `utils` | 数据编码、校验和、缓冲区工具、校验器 |
 
-### 安装
+## 安装
+
+### 前置条件
+
+- Rust 工具链 1.70+
+- 串口设备或 USB 转串口适配器及相应驱动
+
+### 从源码构建
 
 ```bash
-# 克隆并从源码构建
 git clone https://github.com/adancurusul/serial-mcp-server.git
 cd serial-mcp-server
 cargo build --release
 ```
 
-### 基本使用
+二进制文件位于 `target/release/serial-mcp-server`（Windows 为 `.exe`）。
 
-**配置 MCP 客户端**
+## 配置
 
-#### Claude Desktop 配置示例
+### MCP 客户端设置
 
-添加到 Claude Desktop 配置文件:
+将服务器添加到 MCP 客户端配置文件。服务器通过 stdio 通信。
 
-**Windows 示例:**
+**Claude Desktop** (`claude_desktop_config.json`)：
+
 ```json
 {
   "mcpServers": {
     "serial": {
-      "command": "C:\\path\\to\\serial-mcp-server\\target\\release\\serial-mcp-server.exe",
+      "command": "/path/to/serial-mcp-server",
       "args": [],
       "env": {
         "RUST_LOG": "info"
@@ -79,149 +149,98 @@ cargo build --release
 }
 ```
 
-**macOS/Linux 示例:**
+**Claude Code** (`.claude/settings.json` 或项目设置)：
+
 ```json
 {
   "mcpServers": {
     "serial": {
-      "command": "/path/to/serial-mcp-server/target/release/serial-mcp-server",
-      "args": [],
-      "env": {
-        "RUST_LOG": "info"
-      }
+      "command": "target/release/serial-mcp-server"
     }
   }
 }
 ```
 
-其他例如cursor、claude code等参考对应工具文档
+### 命令行参考
 
-## 🎯 试试 STM32 演示
+```
+serial-mcp-server [OPTIONS]
 
-我们提供了一个全面的 **STM32 串口通信演示**，展示了所有功能：
+选项：
+  -c, --config <PATH>            TOML 配置文件路径
+      --log-level <LEVEL>        日志级别：error, warn, info, debug, trace [默认: info]
+      --log-file <PATH>          将日志写入文件而非 stderr
+      --max-connections <N>      最大并发连接数 [默认: 10]
+      --connection-timeout <S>   连接超时秒数 [默认: 30]
+      --default-baud-rate <R>    默认波特率 [默认: 115200]
+      --default-timeout-ms <MS>  默认操作超时毫秒数 [默认: 1000]
+      --max-buffer-size <N>      最大读取缓冲区字节数 [默认: 8192]
+      --retry-count <N>          连接重试次数 [默认: 3]
+      --auto-discovery           启用自动端口发现
+      --allow-port-sharing       允许同一端口多个连接
+      --restrict-ports           限制端口访问至允许列表
+      --generate-config          打印默认 TOML 配置并退出
+      --validate-config          验证配置并退出
+      --show-config              打印当前配置并退出
+```
+
+### 配置文件 (TOML)
+
+生成默认配置文件：
 
 ```bash
-# 进入示例目录
+serial-mcp-server --generate-config > config.toml
+```
+
+命令行参数会在运行时覆盖配置文件中的对应值。
+
+## STM32 示例
+
+仓库包含 STM32 固件示例（`examples/STM32_demo/`），基于 USART1 实现了交互命令接口，115200 baud 8N1：
+
+| 命令 | 功能 |
+|---------|----------|
+| `H` | 显示帮助菜单 |
+| `L` | 切换 LED (PB7) |
+| `C` | 显示并递增计数器 |
+| `R` | 复位计数器 |
+| `B` | LED 闪烁 3 次 |
+| 其他字符 | 回显 |
+
+构建并烧录固件：
+
+```bash
 cd examples/STM32_demo
-
-# 构建并运行固件
 cargo run --release
-
-# 与 MCP 服务器配合使用，获得完整的串口通信体验
 ```
 
-**演示内容:**
-- ✅ **交互式串口命令**: 发送命令并获得实时响应
-- ✅ **全部 5 个 MCP 工具**: 在真实 STM32 硬件上完整验证
-- ✅ **硬件控制**: LED 切换、计数器系统、闪烁模式
-- ✅ **命令接口**: 帮助系统与交互式命令处理
+## 开发
 
-[📖 查看 STM32 演示文档 →](examples/STM32_demo/README.md)
-
-### AI 助手使用示例
-
-#### 列出可用串口
-```
-请列出系统上可用的串口
+```bash
+cargo build                          # Debug 构建
+cargo test --lib                     # 仅单元测试（不依赖硬件）
+cargo test -- --nocapture            # 全部测试，含硬件相关
+cargo test <test_name> -- --nocapture  # 运行单项测试
 ```
 
-#### 连接串口设备
-```
-使用波特率115200连接到我的STM32设备的COM19端口
-```
+### 重要：Future 导入
 
-#### 发送交互命令
-```
-发送 'H' 命令获取帮助菜单，然后发送 'L' 切换LED
+`rmcp` 0.3.2 的 `#[tool]` 宏生成的代码引用了 `Future`。每个使用 `#[tool]` 的文件必须导入：
+
+```rust
+use std::future::Future;
 ```
 
-#### 读取设备响应
-```
-从串口设备读取响应，超时时间2秒
-```
+项目需要 Rust 1.95+，因为该版本对宏穷举性检查更为严格。
 
-#### 完整通信测试
-```
-请帮我测试COM19上STM32板的所有5个MCP串口工具。先列出端口，然后连接，发送一些命令，读取响应，最后关闭连接。
-```
+## 平台支持
 
-## 🛠️ 完整工具集 (5个工具)
-
-所有工具均通过真实 STM32 硬件测试和验证：
-
-### 📡 串口通信 (5个工具)
-| 工具 | 描述 | 状态 |
-|------|------|------|
-| `list_ports` | 发现系统上可用的串口 | ✅ 生产就绪 |
-| `open` | 打开带配置的串口连接 | ✅ 生产就绪 |
-| `write` | 向连接的串口设备发送数据 | ✅ 生产就绪 |
-| `read` | 从串口设备读取数据（带超时） | ✅ 生产就绪 |
-| `close` | 清洁地关闭串口连接 | ✅ 生产就绪 |
-
-**✅ 5/5 工具 - 真实硬件 100% 成功率**
-
-## 🌍 支持的硬件
-
-### 串口设备
-- **STM32**: 所有带UART功能的STM32系列
-- **Arduino**: Uno, Nano, ESP32, ESP8266
-- **嵌入式系统**: 任何带UART/USB-Serial接口的设备
-- **工业设备**: Modbus, RS485转换器
-- **IoT设备**: 带串口通信的传感器、执行器
-- **其他**: 任何带UART/USB-Serial接口的设备
-
-### 串口接口
-- **USB转串口**: CH340, CH343, FTDI, CP2102
-- **内置USB**: 带USB-CDC的STM32, Arduino Leonardo
-- **硬件UART**: 直接UART连接
-
-### 平台支持
-
-| 平台 | 端口格式 | 示例 |
-|------|---------|------|
-| Windows | `COMx` | COM1, COM3, COM19 |
+| 平台 | 端口命名 | 示例 |
+|----------|-------------|----------|
+| Windows | `COMx` | COM1, COM13 |
 | Linux | `/dev/ttyXXX` | /dev/ttyUSB0, /dev/ttyACM0 |
-| macOS | `/dev/tty.xxx` | /dev/tty.usbserial-1234 |
+| macOS | `/dev/tty.*` | /dev/tty.usbserial-1234 |
 
-## 🏆 生产状态
+## 许可证
 
-### ✅ 完全实现并测试
-
-**当前状态: 生产就绪**
-
-- ✅ **完整的串口集成**: 所有5个工具的真实硬件通信
-- ✅ **硬件验证**: 在STM32 + CH343 USB-Serial COM19端口上测试
-- ✅ **交互式通信**: 完整的双向命令/响应系统
-- ✅ **多平台支持**: Windows、Linux、macOS支持，自动检测
-- ✅ **连接管理**: 强大的连接处理与适当的清理
-- ✅ **AI集成**: 完美的MCP协议兼容性
-
-## 📦 技术特性
-
-### 串口实现
-- **跨平台**: 自动端口检测和配置
-- **多种编码**: UTF-8、Hex、二进制数据支持
-- **超时处理**: 可配置的读写超时
-- **连接池**: 多个并发串口连接
-
-### 性能特征
-- **端口发现**: 快速枚举可用端口
-- **连接速度**: 快速建立连接
-- **数据吞吐**: 高效数据传输，最小延迟
-- **会话稳定性**: 经过长时间运行测试
-
-## 🙏 致谢
-
-感谢以下开源项目：
-
-- [serialport-rs](https://crates.io/crates/serialport) - 串口通信库
-- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) - Rust MCP SDK
-- [tokio](https://tokio.rs/) - 异步运行时
-
-## 📄 许可证
-
-本项目采用 MIT 许可证。详细信息请参阅 [LICENSE](LICENSE) 文件。
-
----
-
-⭐ 如果这个项目对你有帮助，请给我们一个 Star！
+MIT。详见 [LICENSE](LICENSE)。

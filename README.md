@@ -1,75 +1,145 @@
 # Serial MCP Server
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://rust-lang.org)
-[![RMCP](https://img.shields.io/badge/RMCP-0.3.2-blue.svg)](https://github.com/modelcontextprotocol/rust-sdk)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes serial port communication as MCP tools. Enables AI assistants to discover, connect to, and communicate with serial devices — microcontrollers, embedded systems, sensors, and industrial equipment.
 
-A professional Model Context Protocol (MCP) server for serial port communication. Provides AI assistants with comprehensive serial communication capabilities for embedded systems, IoT devices, and hardware debugging with real hardware integration.
+## Tools
 
-> 📖 **Language Versions**: [English](README.md) | [中文](README_ZH.md)
+The server registers five MCP tools:
 
-## ✨ Features
+### `list_ports`
 
-- 🚀 **Production Ready**: Real hardware integration with 5 comprehensive serial communication tools
-- 🔌 **Cross-Platform Support**: Windows, Linux, macOS with automatic port detection
-- 📡 **Complete Serial Control**: List ports, connect, send/receive data with full configuration
-- 📝 **Multiple Data Formats**: UTF-8, Hex, Binary encoding support with timeout handling
-- 🛠️ **Hardware Integration**: Tested with STM32, Arduino, ESP32 and other embedded systems
-- 🤖 **AI Integration**: Perfect compatibility with Claude and other AI assistants
-- 🧪 **Comprehensive Testing**: All 5 tools validated with real hardware 
-- ⚡ **High Performance**: Built on Tokio async runtime with concurrent connection support
+Discover available serial ports on the host system. Returns port name, description, and hardware ID (USB VID/PID for USB-serial adapters).
 
-## 🏗️ Architecture
+No parameters.
+
+### `open`
+
+Open a serial port connection.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `port` | string | — | Port name (e.g. `COM13`, `/dev/ttyUSB0`) |
+| `baud_rate` | u32 | — | Baud rate |
+| `data_bits` | string | `"8"` | Data bits: `"5"`, `"6"`, `"7"`, `"8"` |
+| `stop_bits` | string | `"1"` | Stop bits: `"1"`, `"2"` |
+| `parity` | string | `"none"` | Parity: `"none"`, `"odd"`, `"even"` |
+| `flow_control` | string | `"none"` | Flow control: `"none"`, `"software"`, `"hardware"` |
+
+Returns a `connection_id` (UUID) used for subsequent operations.
+
+Supported baud rates: 300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200, 230400, 460800, 921600.
+
+### `close`
+
+Close an open serial connection.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `connection_id` | string | Connection ID returned by `open` |
+
+### `write`
+
+Send data to a serial device.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `connection_id` | string | — | Connection ID |
+| `data` | string | — | Data to send |
+| `encoding` | string | `"utf8"` | Encoding: `"utf8"`, `"hex"`, `"base64"` |
+
+Data is decoded from the specified encoding before transmission. Hex input accepts space-separated bytes (e.g. `"0D 0A"`).
+
+### `read`
+
+Read data from a serial device.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `connection_id` | string | — | Connection ID |
+| `timeout_ms` | u64 | — | Read timeout in milliseconds (optional) |
+| `max_bytes` | usize | 1024 | Maximum bytes to read |
+| `encoding` | string | `"utf8"` | Output encoding: `"utf8"`, `"hex"`, `"base64"` |
+
+Read data is encoded into the specified format before returning. A timeout returns a success result with zero bytes read rather than an error.
+
+## Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MCP Client    │◄──►│  Serial MCP      │◄──►│  Serial Device  │
-│   (Claude/AI)   │    │  Server          │    │  Hardware       │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │  Target Device   │
-                       │  (STM32/Arduino) │
-                       └──────────────────┘
+MCP Client (Claude, etc.)
+    │  JSON-RPC over stdio
+    ▼
+┌─────────────────────────┐
+│  SerialHandler          │  rmcp macros: #[tool], #[tool_router]
+│  (tools/serial_handler) │  Registers 5 MCP tools
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  ConnectionManager      │  Manages concurrent connections
+│  (serial/mod)           │  via Arc<RwLock<HashMap>>
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  SerialConnection       │  Async read/write with timeouts
+│  (serial/connection)    │  Wraps tokio-serial SerialStream
+└───────────┬─────────────┘
+            │
+┌───────────▼─────────────┐
+│  tokio-serial           │  Async serial I/O via Tokio
+│  serialport             │  Port enumeration and sync fallback
+└─────────────────────────┘
 ```
 
-## 🚀 Quick Start
+### Dependencies
+
+- **rmcp** — MCP protocol implementation, provides the `#[tool]` / `#[tool_router]` / `#[tool_handler]` macro system
+- **tokio-serial** — Async serial port I/O backed by Tokio
+- **serialport** — Cross-platform serial port enumeration
+- **clap** — CLI argument parsing with derive macros
+
+### Module layout
+
+| Module | Purpose |
+|--------|---------|
+| `tools/serial_handler` | MCP tool definitions and ServerHandler implementation |
+| `tools/types` | Request/response structs and encode/decode helpers |
+| `serial/connection` | `SerialConnection` — async serial I/O with configurable timeouts |
+| `serial/port` | `PortInfo` — system port enumeration |
+| `serial/mod` | `ConnectionManager` — concurrent connection lifecycle management |
+| `session` | Session management with idle cleanup and statistics tracking |
+| `config` | CLI args, TOML config, validation, and merging |
+| `error` | Unified error hierarchy via `thiserror` |
+| `utils` | Data encoding, checksums, buffer utilities, validators |
+
+## Installation
 
 ### Prerequisites
 
-**Hardware Requirements:**
-- **Serial Device**: STM32, Arduino, ESP32, or any UART-compatible device
-- **Connection**: USB-to-Serial converter or built-in USB-UART
-- **USB Cables**: For connecting device to PC
+- Rust toolchain 1.70+
+- Serial device or USB-to-serial adapter with appropriate drivers
 
-**Software Requirements:**
-- Rust 1.70+ 
-- Serial device drivers (automatically detected on most systems)
-
-### Installation
+### Build from source
 
 ```bash
-# Clone and build from source
 git clone https://github.com/adancurusul/serial-mcp-server.git
 cd serial-mcp-server
 cargo build --release
 ```
 
-### Basic Usage
+The binary will be at `target/release/serial-mcp-server` (`.exe` on Windows).
 
-**Configure MCP Clients**
+## Configuration
 
-#### Claude Desktop Configuration Example
+### MCP Client Setup
 
-Add to Claude Desktop configuration file:
+Add the server to your MCP client's configuration file. The server communicates over stdio.
 
-**Windows Example:**
+**Claude Desktop** (`claude_desktop_config.json`):
+
 ```json
 {
   "mcpServers": {
     "serial": {
-      "command": "C:\\path\\to\\serial-mcp-server\\target\\release\\serial-mcp-server.exe",
+      "command": "/path/to/serial-mcp-server",
       "args": [],
       "env": {
         "RUST_LOG": "info"
@@ -79,149 +149,98 @@ Add to Claude Desktop configuration file:
 }
 ```
 
-**macOS/Linux Example:**
+**Claude Code** (`.claude/settings.json` or project settings):
+
 ```json
 {
   "mcpServers": {
     "serial": {
-      "command": "/path/to/serial-mcp-server/target/release/serial-mcp-server",
-      "args": [],
-      "env": {
-        "RUST_LOG": "info"
-      }
+      "command": "target/release/serial-mcp-server"
     }
   }
 }
 ```
 
-Other examples for other tools like cursor, claude code etc. please refer to the corresponding tool documentation
+### CLI Reference
 
-## 🎯 Try the STM32 Demo
+```
+serial-mcp-server [OPTIONS]
 
-We provide a comprehensive **STM32 Serial Communication Demo** that showcases all capabilities:
+Options:
+  -c, --config <PATH>           Path to TOML configuration file
+      --log-level <LEVEL>       Log level: error, warn, info, debug, trace [default: info]
+      --log-file <PATH>         Write logs to file instead of stderr
+      --max-connections <N>     Maximum concurrent connections [default: 10]
+      --connection-timeout <S>  Connection timeout in seconds [default: 30]
+      --default-baud-rate <R>   Default baud rate [default: 115200]
+      --default-timeout-ms <MS> Default operation timeout in ms [default: 1000]
+      --max-buffer-size <N>     Maximum read buffer size in bytes [default: 8192]
+      --retry-count <N>         Connection retry count [default: 3]
+      --auto-discovery           Enable automatic port discovery
+      --allow-port-sharing       Allow multiple connections to the same port
+      --restrict-ports           Restrict port access to allowed list
+      --generate-config          Print default TOML configuration and exit
+      --validate-config          Validate configuration and exit
+      --show-config              Print current configuration and exit
+```
+
+### Configuration File (TOML)
+
+Generate a default configuration file:
 
 ```bash
-# Navigate to the example
+serial-mcp-server --generate-config > config.toml
+```
+
+CLI arguments override corresponding config file values at runtime.
+
+## STM32 Demo
+
+The repository includes an example STM32 firmware (`examples/STM32_demo/`) that implements an interactive command interface over USART1 at 115200 baud 8N1:
+
+| Command | Function |
+|---------|----------|
+| `H` | Display help menu |
+| `L` | Toggle LED (PB7) |
+| `C` | Show and increment counter |
+| `R` | Reset counter |
+| `B` | Blink LED 3 times |
+| Any other | Echo character |
+
+Build and flash the firmware:
+
+```bash
 cd examples/STM32_demo
-
-# Build and run the firmware  
 cargo run --release
-
-# Use with MCP server for complete serial communication experience
 ```
 
-**What the demo shows:**
-- ✅ **Interactive Serial Commands**: Send commands and get real-time responses
-- ✅ **All 5 MCP Tools**: Complete validation with real STM32 hardware
-- ✅ **Hardware Control**: LED toggle, counter system, blink patterns
-- ✅ **Command Interface**: Help system with interactive command processing
+## Development
 
-[📖 View STM32 Demo Documentation →](examples/STM32_demo/README.md)
-
-### Usage Examples with AI Assistants
-
-#### List Available Serial Ports
-```
-Please list available serial ports on the system
+```bash
+cargo build                          # Debug build
+cargo test --lib                     # Unit tests only (no hardware)
+cargo test -- --nocapture            # All tests including hardware-dependent
+cargo test <test_name> -- --nocapture  # Single test
 ```
 
-#### Connect to Serial Device
-```
-Connect to COM19 with baud rate 115200 for my STM32 device
-```
+### Important: Future import
 
-#### Send Interactive Commands
-```
-Send 'H' command to get help menu, then send 'L' to toggle the LED
+The `rmcp` 0.3.2 `#[tool]` macro generates code referencing `Future`. Each file using `#[tool]` must import it:
+
+```rust
+use std::future::Future;
 ```
 
-#### Read Device Responses
-```
-Read the response from the serial device with 2 second timeout
-```
+The project requires Rust 1.95+ due to macro exhaustiveness checking changes.
 
-#### Complete Communication Test
-```
-Please help me test all 5 MCP serial tools with my STM32 board on COM19. Start by listing ports, then connect, send some commands, read responses, and finally close the connection.
-```
+## Platform Support
 
-## 🛠️ Complete Tool Set (5 Tools)
-
-All tools tested and validated with real STM32 hardware:
-
-### 📡 Serial Communication (5 tools)
-| Tool | Description | Status |
-|------|-------------|----------|
-| `list_ports` | Discover available serial ports on system | ✅ Production Ready |
-| `open` | Open serial connection with configuration | ✅ Production Ready |
-| `write` | Send data to connected serial device | ✅ Production Ready |
-| `read` | Read data from serial device with timeout | ✅ Production Ready |
-| `close` | Close serial connection cleanly | ✅ Production Ready |
-
-**✅ 5/5 Tools - 100% Success Rate with Real Hardware**
-
-## 🌍 Supported Hardware
-
-### Serial Devices
-- **STM32**: All STM32 series with UART capability  
-- **Arduino**: Uno, Nano, ESP32, ESP8266
-- **Embedded Systems**: Any device with UART/USB-Serial interface
-- **Industrial**: Modbus, RS485 converters
-- **IoT Devices**: Sensors, actuators with serial communication
-- **Other**: Any device with UART/USB-Serial interface
-
-### Serial Interfaces
-- **USB-to-Serial**: CH340, CH343, FTDI, CP2102
-- **Built-in USB**: STM32 with USB-CDC, Arduino Leonardo
-- **Hardware UART**: Direct UART connections
-
-### Platform Support
-
-| Platform | Port Format | Examples |
+| Platform | Port naming | Examples |
 |----------|-------------|----------|
-| Windows | `COMx` | COM1, COM3, COM19 |
+| Windows | `COMx` | COM1, COM13 |
 | Linux | `/dev/ttyXXX` | /dev/ttyUSB0, /dev/ttyACM0 |
-| macOS | `/dev/tty.xxx` | /dev/tty.usbserial-1234 |
+| macOS | `/dev/tty.*` | /dev/tty.usbserial-1234 |
 
-## 🏆 Production Status
+## License
 
-### ✅ Fully Implemented and Tested
-
-**Current Status: PRODUCTION READY**
-
-- ✅ **Complete Serial Integration**: Real hardware communication with all 5 tools
-- ✅ **Hardware Validation**: Tested with STM32 + CH343 USB-Serial on COM19
-- ✅ **Interactive Communication**: Full bidirectional command/response system
-- ✅ **Multi-Platform**: Windows, Linux, macOS support with automatic detection
-- ✅ **Connection Management**: Robust connection handling with proper cleanup
-- ✅ **AI Integration**: Perfect MCP protocol compatibility
-
-## 📦 Technical Features
-
-### Serial Implementation
-- **Cross-Platform**: Automatic port detection and configuration
-- **Multiple Encodings**: UTF-8, Hex, Binary data support
-- **Timeout Handling**: Configurable read/write timeouts
-- **Connection Pooling**: Multiple concurrent serial connections
-
-### Performance Characteristics
-- **Port Discovery**: Fast enumeration of available ports
-- **Connection Speed**: Rapid connection establishment
-- **Data Throughput**: Efficient data transfer with minimal latency
-- **Session Stability**: Tested for extended operation periods
-
-## 🙏 Acknowledgments
-
-Thanks to the following open source projects:
-
-- [serialport-rs](https://crates.io/crates/serialport) - Serial port communication library
-- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) - Rust MCP SDK
-- [tokio](https://tokio.rs/) - Async runtime
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-⭐ If this project helps you, please give us a Star!
+MIT. See [LICENSE](LICENSE).
