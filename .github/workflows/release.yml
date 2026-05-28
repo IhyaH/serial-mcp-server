@@ -3,8 +3,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
 
 jobs:
   build:
@@ -18,7 +16,7 @@ jobs:
             artifact: serial-mcp-server.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: serial-mcp-server
+            artifact: serial-mcp-server-linux-x64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: serial-mcp-server-darwin-x64
@@ -36,33 +34,38 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            cp target/${{ matrix.target }}/release/serial-mcp-server.exe ${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/serial-mcp-server ${{ matrix.artifact }}
+          fi
+
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
           if-no-files-found: error
 
   publish:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: binaries
+          merge-multiple: true
 
-      - name: Attach binaries to release
+      - name: List binaries
+        run: ls -la binaries/
+
+      - name: Upload to Release
         run: |
-          cd artifacts
-          for dir in */; do
-            binary=$(ls "$dir")
-            cp "$dir/$binary" "./$binary"
-          done
-          ls -la
-          gh release upload "${{ github.ref_name }}" ./*.exe ./*serial-mcp-server* --clobber
+          gh release upload "${{ github.ref_name }}" binaries/* --clobber
         env:
           GH_TOKEN: ${{ github.token }}
