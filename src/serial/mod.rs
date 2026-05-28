@@ -11,10 +11,10 @@ pub use connection::{
 pub use error::SerialError as LocalSerialError;
 pub use port::PortInfo;
 
+use crate::error::SerialError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::error::SerialError;
 
 #[derive(Debug)]
 pub struct ConnectionManager {
@@ -27,7 +27,7 @@ impl ConnectionManager {
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Connect to a serial port with individual parameters (for compatibility with session manager)
     pub async fn connect(
         &self,
@@ -39,8 +39,8 @@ impl ConnectionManager {
         flow_control: &str,
         _timeout_ms: u64,
     ) -> Result<SerialConnection, SerialError> {
-        use connection::{DataBits, StopBits, Parity, FlowControl};
-        
+        use connection::{DataBits, FlowControl, Parity, StopBits};
+
         let data_bits = match data_bits {
             5 => DataBits::Five,
             6 => DataBits::Six,
@@ -48,27 +48,27 @@ impl ConnectionManager {
             8 => DataBits::Eight,
             _ => return Err(SerialError::InvalidDataBits(data_bits)),
         };
-        
+
         let stop_bits = match stop_bits.to_lowercase().as_str() {
             "one" | "1" => StopBits::One,
             "two" | "2" => StopBits::Two,
             _ => return Err(SerialError::InvalidStopBits(stop_bits.to_string())),
         };
-        
+
         let parity = match parity.to_lowercase().as_str() {
             "none" => Parity::None,
             "even" => Parity::Even,
             "odd" => Parity::Odd,
             _ => return Err(SerialError::InvalidParity(parity.to_string())),
         };
-        
+
         let flow_control = match flow_control.to_lowercase().as_str() {
             "none" => FlowControl::None,
             "software" => FlowControl::Software,
             "hardware" => FlowControl::Hardware,
             _ => return Err(SerialError::InvalidFlowControl(flow_control.to_string())),
         };
-        
+
         let config = ConnectionConfig {
             port: port_name.to_string(),
             baud_rate,
@@ -77,16 +77,18 @@ impl ConnectionManager {
             parity,
             flow_control,
         };
-        
-        SerialConnection::new(config).await.map_err(|e| SerialError::ConnectionFailed(e.to_string()))
+
+        SerialConnection::new(config)
+            .await
+            .map_err(|e| SerialError::ConnectionFailed(e.to_string()))
     }
-    
+
     pub async fn open(&self, config: ConnectionConfig) -> Result<String, LocalSerialError> {
         let connection = Arc::new(SerialConnection::new(config.clone()).await?);
         let id = connection.id().to_string();
-        
+
         let mut connections = self.connections.write().await;
-        
+
         // Check if port is already in use
         let port_lower = config.port.to_lowercase();
         for (_, conn) in connections.iter() {
@@ -94,11 +96,11 @@ impl ConnectionManager {
                 return Err(LocalSerialError::ConnectionExists(config.port));
             }
         }
-        
+
         connections.insert(id.clone(), connection);
         Ok(id)
     }
-    
+
     pub async fn close(&self, id: &str) -> Result<(), LocalSerialError> {
         let mut connections = self.connections.write().await;
         connections
@@ -106,7 +108,7 @@ impl ConnectionManager {
             .ok_or_else(|| LocalSerialError::InvalidConnection(id.to_string()))?;
         Ok(())
     }
-    
+
     pub async fn get(&self, id: &str) -> Result<Arc<SerialConnection>, LocalSerialError> {
         let connections = self.connections.read().await;
         connections
@@ -114,15 +116,15 @@ impl ConnectionManager {
             .cloned()
             .ok_or_else(|| LocalSerialError::InvalidConnection(id.to_string()))
     }
-    
+
     pub async fn list(&self) -> Vec<ConnectionStatus> {
         let connections = self.connections.read().await;
         let mut statuses = Vec::new();
-        
+
         for connection in connections.values() {
             statuses.push(connection.status().await);
         }
-        
+
         statuses
     }
 }

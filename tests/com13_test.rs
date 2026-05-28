@@ -1,7 +1,7 @@
 //! COM13 设备异步测试 (tokio-serial)
 //! 验证 MCP 服务器的 SerialConnection 能正常与 COM13 通信
 
-use serial_mcp_server::serial::{ConnectionConfig, DataBits, StopBits, Parity, FlowControl};
+use serial_mcp_server::serial::{ConnectionConfig, DataBits, FlowControl, Parity, StopBits};
 use tokio::time::{timeout, Duration};
 
 fn config() -> ConnectionConfig {
@@ -79,13 +79,20 @@ async fn test_com13_async_communication() {
 
         match timeout(Duration::from_millis(500), conn.read(&mut buf, Some(500))).await {
             Ok(Ok(n)) => {
-                println!("  发送 '{}' -> 收到 {:?}", ch as char, String::from_utf8_lossy(&buf[..n]));
+                println!(
+                    "  发送 '{}' -> 收到 {:?}",
+                    ch as char,
+                    String::from_utf8_lossy(&buf[..n])
+                );
             }
             _ => println!("  发送 '{}' -> 无回复", ch as char),
         }
     }
 
     let st = conn.status().await;
-    println!("\n统计: 发送={} 字节, 接收={} 字节", st.bytes_sent, st.bytes_received);
+    println!(
+        "\n统计: 发送={} 字节, 接收={} 字节",
+        st.bytes_sent, st.bytes_received
+    );
     println!("=== 异步测试完成 ===");
 }

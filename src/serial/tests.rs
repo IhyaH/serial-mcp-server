@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::serial::{ConnectionManager, ConnectionConfig, DataBits, StopBits, Parity, FlowControl, PortInfo};
     use crate::serial::error::SerialError;
+    use crate::serial::{
+        ConnectionConfig, ConnectionManager, DataBits, FlowControl, Parity, PortInfo, StopBits,
+    };
 
     #[tokio::test]
     async fn test_connection_manager_new() {
@@ -31,7 +33,7 @@ mod tests {
         let manager = ConnectionManager::new();
         let result = manager.close("invalid_id").await;
         assert!(result.is_err());
-        
+
         match result {
             Err(SerialError::InvalidConnection(id)) => {
                 assert_eq!(id, "invalid_id");
@@ -49,36 +51,72 @@ mod tests {
 
     #[test]
     fn test_data_bits_conversion() {
-        assert_eq!(serialport::DataBits::from(DataBits::Five), serialport::DataBits::Five);
-        assert_eq!(serialport::DataBits::from(DataBits::Six), serialport::DataBits::Six);
-        assert_eq!(serialport::DataBits::from(DataBits::Seven), serialport::DataBits::Seven);
-        assert_eq!(serialport::DataBits::from(DataBits::Eight), serialport::DataBits::Eight);
+        assert_eq!(
+            serialport::DataBits::from(DataBits::Five),
+            serialport::DataBits::Five
+        );
+        assert_eq!(
+            serialport::DataBits::from(DataBits::Six),
+            serialport::DataBits::Six
+        );
+        assert_eq!(
+            serialport::DataBits::from(DataBits::Seven),
+            serialport::DataBits::Seven
+        );
+        assert_eq!(
+            serialport::DataBits::from(DataBits::Eight),
+            serialport::DataBits::Eight
+        );
     }
 
     #[test]
     fn test_stop_bits_conversion() {
-        assert_eq!(serialport::StopBits::from(StopBits::One), serialport::StopBits::One);
-        assert_eq!(serialport::StopBits::from(StopBits::Two), serialport::StopBits::Two);
+        assert_eq!(
+            serialport::StopBits::from(StopBits::One),
+            serialport::StopBits::One
+        );
+        assert_eq!(
+            serialport::StopBits::from(StopBits::Two),
+            serialport::StopBits::Two
+        );
     }
 
     #[test]
     fn test_parity_conversion() {
-        assert_eq!(serialport::Parity::from(Parity::None), serialport::Parity::None);
-        assert_eq!(serialport::Parity::from(Parity::Odd), serialport::Parity::Odd);
-        assert_eq!(serialport::Parity::from(Parity::Even), serialport::Parity::Even);
+        assert_eq!(
+            serialport::Parity::from(Parity::None),
+            serialport::Parity::None
+        );
+        assert_eq!(
+            serialport::Parity::from(Parity::Odd),
+            serialport::Parity::Odd
+        );
+        assert_eq!(
+            serialport::Parity::from(Parity::Even),
+            serialport::Parity::Even
+        );
     }
 
     #[test]
     fn test_flow_control_conversion() {
-        assert_eq!(serialport::FlowControl::from(FlowControl::None), serialport::FlowControl::None);
-        assert_eq!(serialport::FlowControl::from(FlowControl::Software), serialport::FlowControl::Software);
-        assert_eq!(serialport::FlowControl::from(FlowControl::Hardware), serialport::FlowControl::Hardware);
+        assert_eq!(
+            serialport::FlowControl::from(FlowControl::None),
+            serialport::FlowControl::None
+        );
+        assert_eq!(
+            serialport::FlowControl::from(FlowControl::Software),
+            serialport::FlowControl::Software
+        );
+        assert_eq!(
+            serialport::FlowControl::from(FlowControl::Hardware),
+            serialport::FlowControl::Hardware
+        );
     }
 
     #[test]
     fn test_invalid_baud_rate() {
         use super::super::connection::SerialConnection;
-        
+
         let config = ConnectionConfig {
             port: "COM1".to_string(),
             baud_rate: 0,
@@ -90,7 +128,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(SerialConnection::new(config));
-        
+
         assert!(result.is_err());
         match result {
             Err(SerialError::InvalidBaudRate(rate)) => {
@@ -130,7 +168,7 @@ mod tests {
         // This test will pass even if no ports are found
         let result = PortInfo::list_ports();
         assert!(result.is_ok());
-        
+
         if let Ok(ports) = result {
             for port in ports {
                 assert!(!port.name.is_empty());

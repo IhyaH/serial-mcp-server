@@ -1,5 +1,5 @@
 //! Error types for the serial MCP server
-//! 
+//!
 //! This module provides comprehensive error handling for all serial communication
 //! and MCP server operations, inspired by embedded-debugger-mcp's error design.
 

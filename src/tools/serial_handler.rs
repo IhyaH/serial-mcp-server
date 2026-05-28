@@ -1,21 +1,19 @@
 //! Serial MCP Handler using rust-sdk standard approach
-//! 
+//!
 //! This implementation follows the official rust-sdk patterns for proper tool registration
 
-use std::{future::Future, sync::Arc};
 use rmcp::{
-    tool, tool_handler, tool_router, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::*,
-    ErrorData as McpError,
     service::RequestContext,
-    RoleServer,
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
+use std::{future::Future, sync::Arc};
 use tracing::{debug, error, info};
 
-use crate::serial::{PortInfo, ConnectionManager, LocalSerialError};
-use crate::config::Config;
 use super::types::*;
+use crate::config::Config;
+use crate::serial::{ConnectionManager, LocalSerialError, PortInfo};
 
 /// Serial tool handler using rust-sdk standard patterns
 #[derive(Clone)]
@@ -36,11 +34,11 @@ impl SerialHandler {
     #[tool(description = "List all available serial ports on the system")]
     async fn list_ports(&self) -> Result<CallToolResult, McpError> {
         debug!("Listing available serial ports");
-        
+
         match PortInfo::list_ports() {
             Ok(ports) => {
                 info!("Found {} serial ports", ports.len());
-                
+
                 let message = if ports.is_empty() {
                     "No serial ports found on the system".to_string()
                 } else {
@@ -55,34 +53,43 @@ impl SerialHandler {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    
+
                     format!("Found {} serial ports:\n{}", ports.len(), port_list)
                 };
-                
+
                 Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Err(e) => {
                 error!("Failed to list serial ports: {}", e);
-                Err(McpError::internal_error(format!("Failed to list ports: {}", e), None))
+                Err(McpError::internal_error(
+                    format!("Failed to list ports: {}", e),
+                    None,
+                ))
             }
         }
     }
 
     #[tool(description = "Open a serial port connection with specified configuration")]
-    async fn open(&self, Parameters(args): Parameters<OpenArgs>) -> Result<CallToolResult, McpError> {
+    async fn open(
+        &self,
+        Parameters(args): Parameters<OpenArgs>,
+    ) -> Result<CallToolResult, McpError> {
         debug!("Opening serial connection to {}", args.port);
-        
+
         let config: crate::serial::ConnectionConfig = args.into();
-        
+
         match self.connection_manager.open(config.clone()).await {
             Ok(connection_id) => {
-                info!("Opened serial connection {} to {}", connection_id, config.port);
-                
+                info!(
+                    "Opened serial connection {} to {}",
+                    connection_id, config.port
+                );
+
                 let message = format!(
                     "Serial connection opened\nConnection ID: {}\nPort: {}\nBaud rate: {}",
                     connection_id, config.port, config.baud_rate
                 );
-                
+
                 Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Err(e) => {
@@ -98,18 +105,27 @@ impl SerialHandler {
     }
 
     #[tool(description = "Close an open serial port connection")]
-    async fn close(&self, Parameters(args): Parameters<CloseArgs>) -> Result<CallToolResult, McpError> {
+    async fn close(
+        &self,
+        Parameters(args): Parameters<CloseArgs>,
+    ) -> Result<CallToolResult, McpError> {
         debug!("Closing serial connection {}", args.connection_id);
-        
+
         match self.connection_manager.close(&args.connection_id).await {
             Ok(()) => {
                 info!("Closed serial connection {}", args.connection_id);
-                let message = format!("Serial connection closed\nConnection ID: {}", args.connection_id);
+                let message = format!(
+                    "Serial connection closed\nConnection ID: {}",
+                    args.connection_id
+                );
                 Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Err(e) => {
                 error!("Failed to close connection {}: {}", args.connection_id, e);
-                let error_msg = format!("Error: Failed to close connection {} - {}", args.connection_id, e);
+                let error_msg = format!(
+                    "Error: Failed to close connection {} - {}",
+                    args.connection_id, e
+                );
                 if matches!(e, LocalSerialError::InvalidConnection(_)) {
                     Err(McpError::invalid_request(error_msg, None))
                 } else {
@@ -120,9 +136,15 @@ impl SerialHandler {
     }
 
     #[tool(description = "Write data to a serial port connection")]
-    async fn write(&self, Parameters(args): Parameters<WriteArgs>) -> Result<CallToolResult, McpError> {
-        debug!("Writing to connection {} with encoding {}", args.connection_id, args.encoding);
-        
+    async fn write(
+        &self,
+        Parameters(args): Parameters<WriteArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(
+            "Writing to connection {} with encoding {}",
+            args.connection_id, args.encoding
+        );
+
         // Get connection
         let connection = match self.connection_manager.get(&args.connection_id).await {
             Ok(conn) => conn,
@@ -137,16 +159,22 @@ impl SerialHandler {
         let data = match decode_data(&args.data, &args.encoding) {
             Ok(data) => data,
             Err(e) => {
-                error!("Failed to decode data with encoding {}: {}", args.encoding, e);
+                error!(
+                    "Failed to decode data with encoding {}: {}",
+                    args.encoding, e
+                );
                 let error_msg = format!("Error: Data decoding failed - {}", e);
                 return Err(McpError::invalid_request(error_msg, None));
             }
         };
-        
+
         // Send data
         match connection.write(&data).await {
             Ok(bytes_written) => {
-                debug!("Wrote {} bytes to connection {}", bytes_written, args.connection_id);
+                debug!(
+                    "Wrote {} bytes to connection {}",
+                    bytes_written, args.connection_id
+                );
                 let message = format!(
                     "Data sent successfully\nConnection ID: {}\nBytes written: {}\nData: {:?}",
                     args.connection_id, bytes_written, args.data
@@ -154,7 +182,10 @@ impl SerialHandler {
                 Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Err(e) => {
-                error!("Failed to write to connection {}: {}", args.connection_id, e);
+                error!(
+                    "Failed to write to connection {}: {}",
+                    args.connection_id, e
+                );
                 let error_msg = format!("Error: Data sending failed - {}", e);
                 Err(McpError::internal_error(error_msg, None))
             }
@@ -162,9 +193,15 @@ impl SerialHandler {
     }
 
     #[tool(description = "Read data from a serial port connection")]
-    async fn read(&self, Parameters(args): Parameters<ReadArgs>) -> Result<CallToolResult, McpError> {
-        debug!("Reading from connection {} with timeout {:?}", args.connection_id, args.timeout_ms);
-        
+    async fn read(
+        &self,
+        Parameters(args): Parameters<ReadArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        debug!(
+            "Reading from connection {} with timeout {:?}",
+            args.connection_id, args.timeout_ms
+        );
+
         // Get connection
         let connection = match self.connection_manager.get(&args.connection_id).await {
             Ok(conn) => conn,
@@ -174,20 +211,23 @@ impl SerialHandler {
                 return Err(McpError::invalid_request(error_msg, None));
             }
         };
-        
+
         // Prepare buffer
         let mut buffer = vec![0u8; args.max_bytes];
-        
+
         // Read data
         match connection.read(&mut buffer, args.timeout_ms).await {
             Ok(bytes_read) => {
                 buffer.truncate(bytes_read);
-                
+
                 // Encode data
                 match encode_data(&buffer, &args.encoding) {
                     Ok(encoded) => {
-                        debug!("Read {} bytes from connection {}", bytes_read, args.connection_id);
-                        
+                        debug!(
+                            "Read {} bytes from connection {}",
+                            bytes_read, args.connection_id
+                        );
+
                         let message = if bytes_read > 0 {
                             format!(
                                 "Data read successfully\nConnection ID: {}\nBytes read: {}\nData: {:?}",
@@ -196,10 +236,11 @@ impl SerialHandler {
                         } else {
                             format!(
                                 "Read timeout\nConnection ID: {}\nTimeout: {}ms\nBytes read: 0",
-                                args.connection_id, args.timeout_ms.unwrap_or(1000)
+                                args.connection_id,
+                                args.timeout_ms.unwrap_or(1000)
                             )
                         };
-                        
+
                         Ok(CallToolResult::success(vec![Content::text(message)]))
                     }
                     Err(e) => {
@@ -209,23 +250,25 @@ impl SerialHandler {
                     }
                 }
             }
-            Err(e) => {
-                match e {
-                    crate::serial::LocalSerialError::ReadTimeout => {
-                        debug!("Read timeout on connection {}", args.connection_id);
-                        let message = format!(
-                            "Read timeout\nConnection ID: {}\nTimeout: {}ms\nBytes read: 0",
-                            args.connection_id, args.timeout_ms.unwrap_or(1000)
-                        );
-                        Ok(CallToolResult::success(vec![Content::text(message)]))
-                    }
-                    _ => {
-                        error!("Failed to read from connection {}: {}", args.connection_id, e);
-                        let error_msg = format!("Error: Data reading failed - {}", e);
-                        Err(McpError::internal_error(error_msg, None))
-                    }
+            Err(e) => match e {
+                crate::serial::LocalSerialError::ReadTimeout => {
+                    debug!("Read timeout on connection {}", args.connection_id);
+                    let message = format!(
+                        "Read timeout\nConnection ID: {}\nTimeout: {}ms\nBytes read: 0",
+                        args.connection_id,
+                        args.timeout_ms.unwrap_or(1000)
+                    );
+                    Ok(CallToolResult::success(vec![Content::text(message)]))
                 }
-            }
+                _ => {
+                    error!(
+                        "Failed to read from connection {}: {}",
+                        args.connection_id, e
+                    );
+                    let error_msg = format!("Error: Data reading failed - {}", e);
+                    Err(McpError::internal_error(error_msg, None))
+                }
+            },
         }
     }
 }

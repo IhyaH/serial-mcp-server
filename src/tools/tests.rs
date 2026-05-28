@@ -41,7 +41,7 @@ mod tests {
     fn test_decode_hex_invalid() {
         // Odd length
         assert!(decode_data("48656c6c6", "hex").is_err());
-        
+
         // Invalid characters
         assert!(decode_data("48656cXY", "hex").is_err());
     }
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_roundtrip_encodings() {
         let test_data = b"Hello, World! 123 \x00\xFF";
-        
+
         // Test hex roundtrip
         let hex_encoded = encode_data(test_data, "hex").unwrap();
         let hex_decoded = decode_data(&hex_encoded, "hex").unwrap();

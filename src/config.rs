@@ -1,12 +1,12 @@
 //! Configuration management for the serial MCP server
-//! 
+//!
 //! This module provides comprehensive configuration handling including command line
 //! arguments, configuration files, validation, and logging setup.
 
+use crate::error::{ConfigError, Result, SerialError};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use clap::Parser;
-use crate::error::{SerialError, ConfigError, Result};
 
 /// Command line arguments
 #[derive(Parser, Debug)]
@@ -99,8 +99,9 @@ impl Config {
     /// Load configuration from file or create default
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
         if let Some(path) = config_path {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| SerialError::InvalidConfig(format!("Failed to read config file: {}", e)))?;
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                SerialError::InvalidConfig(format!("Failed to read config file: {}", e))
+            })?;
             let config: Config = toml::from_str(&content)
                 .map_err(|e| SerialError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))?;
             config.validate()?;
@@ -132,7 +133,8 @@ impl Config {
             return Err(ConfigError::InvalidValue {
                 field: "server.max_connections".to_string(),
                 value: "0".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         if self.server.max_connections > 1000 {
@@ -141,7 +143,8 @@ impl Config {
                 value: self.server.max_connections.to_string(),
                 min: "1".to_string(),
                 max: "1000".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         // Serial validation
@@ -149,31 +152,39 @@ impl Config {
             return Err(ConfigError::InvalidValue {
                 field: "serial.default_baud_rate".to_string(),
                 value: "0".to_string(),
-            }.into());
+            }
+            .into());
         }
 
-        let valid_baud_rates = [300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200, 230400, 460800, 921600];
+        let valid_baud_rates = [
+            300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200, 230400,
+            460800, 921600,
+        ];
         if !valid_baud_rates.contains(&self.serial.default_baud_rate) {
             return Err(ConfigError::InvalidValue {
                 field: "serial.default_baud_rate".to_string(),
                 value: self.serial.default_baud_rate.to_string(),
-            }.into());
+            }
+            .into());
         }
 
         if self.serial.max_buffer_size == 0 {
             return Err(ConfigError::InvalidValue {
                 field: "serial.max_buffer_size".to_string(),
                 value: "0".to_string(),
-            }.into());
+            }
+            .into());
         }
 
-        if self.serial.max_buffer_size > 1024 * 1024 {  // 1MB max
+        if self.serial.max_buffer_size > 1024 * 1024 {
+            // 1MB max
             return Err(ConfigError::ValueOutOfRange {
                 field: "serial.max_buffer_size".to_string(),
                 value: self.serial.max_buffer_size.to_string(),
                 min: "1".to_string(),
                 max: "1048576".to_string(),
-            }.into());
+            }
+            .into());
         }
 
         // Logging validation
@@ -182,7 +193,8 @@ impl Config {
             return Err(ConfigError::InvalidValue {
                 field: "logging.level".to_string(),
                 value: self.logging.level.clone(),
-            }.into());
+            }
+            .into());
         }
 
         Ok(())
@@ -193,7 +205,6 @@ impl Config {
         toml::to_string_pretty(self)
             .map_err(|e| SerialError::InvalidConfig(format!("Failed to serialize config: {}", e)))
     }
-
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -272,7 +283,7 @@ impl Default for SecurityConfig {
             restrict_ports: false,
             allowed_ports: vec![],
             blocked_ports: vec![],
-            max_data_size: 65536,  // 64KB
+            max_data_size: 65536, // 64KB
             rate_limit_enabled: false,
             rate_limit_requests_per_second: 100,
             enable_authentication: false,
@@ -309,4 +320,3 @@ impl Default for LoggingConfig {
         }
     }
 }
-
